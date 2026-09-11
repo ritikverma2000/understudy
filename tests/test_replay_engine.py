@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from understudy.artifact.models import CapabilityArtifact, Target
-from understudy.replay import ReplayEngine, ReplayPolicyError
+from understudy.replay import ReplayEngine, ReplayPolicyError, StepExecutionError
 from understudy.surface import ResolvedTarget
 
 
@@ -176,3 +176,49 @@ def test_missing_runtime_binding_is_rejected(
             inputs={"member_id": "00123"},
             runtime={},
         )
+
+
+def test_route_outside_allowed_origin_is_rejected(
+    artifact: CapabilityArtifact,
+) -> None:
+    changed = artifact.model_copy(deep=True)
+    changed.target.routes["app_shell"].pattern = "https://evil.example/app"
+
+    with pytest.raises(ReplayPolicyError, match="outside allowed origins"):
+        ReplayEngine(changed, WorkflowSurface()).run(
+            inputs={"member_id": "00123"},
+            runtime={"base_url": "http://example.test"},
+        )
+
+
+def test_step_failure_includes_last_observation(
+    artifact: CapabilityArtifact,
+) -> None:
+    class BrokenSurface(WorkflowSurface):
+        def activate(self, target: ResolvedTarget) -> None:
+            if target.target_ref == "member_result_link":
+                self.state = "search"
+                return
+            super().activate(target)
+
+    changed = artifact.model_copy(deep=True)
+    step = next(
+        item for item in changed.steps if item.id == "open_matching_member"
+    )
+    step.timeout_ms = 1
+    step.retry.max_attempts = 1
+
+    with pytest.raises(StepExecutionError) as captured:
+        ReplayEngine(
+            changed,
+            BrokenSurface(),
+            poll_interval_ms=1,
+        ).run(
+            inputs={"member_id": "00123"},
+            runtime={"base_url": "http://example.test"},
+        )
+
+    error = captured.value
+    assert error.step_id == "open_matching_member"
+    assert error.cause_type == "ConditionTimeoutError"
+    assert "condition 'all' was not met" in error.observed

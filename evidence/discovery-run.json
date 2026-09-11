@@ -1,0 +1,60 @@
+{
+  "run_id": "discovery-1dc20d7d1483",
+  "kind": "llm_discovery",
+  "status": "success",
+  "provider": "openrouter",
+  "model": "nex-agi/nex-n2.5-pro:free",
+  "started_at": "2026-09-11T20:35:09.007497+00:00",
+  "completed_at": "2026-09-11T20:35:21.481102+00:00",
+  "goal": "Look up member {{inputs.member_id}} and read the current Savings balance",
+  "target": "http://127.0.0.1:5000",
+  "steps": [
+    {
+      "index": 1,
+      "action": "type_text",
+      "target_ref": "member_id_input",
+      "control_role": "textbox",
+      "control_name": "Member ID",
+      "decision_summary": "Enter member {{inputs.member_id}} in the Member ID field to begin the lookup."
+    },
+    {
+      "index": 2,
+      "action": "activate",
+      "target_ref": "search_control",
+      "control_role": "link",
+      "control_name": "Search",
+      "decision_summary": "Activate Search to look up the entered member ID."
+    },
+    {
+      "index": 3,
+      "action": "activate",
+      "target_ref": "member_result_link",
+      "control_role": "link",
+      "control_name": "View details",
+      "decision_summary": "Open the matching member {{inputs.member_id}} result to access its account details."
+    },
+    {
+      "index": 4,
+      "action": "read",
+      "target_ref": "savings_balance_cell",
+      "control_role": "cell",
+      "control_name": "[REDACTED FINANCIAL VALUE]",
+      "decision_summary": "Read the balance shown beside the Savings account."
+    },
+    {
+      "index": 5,
+      "action": "finish",
+      "target_ref": null,
+      "control_role": null,
+      "control_name": null,
+      "decision_summary": "Member {{inputs.member_id}}'s current Savings balance is [REDACTED FINANCIAL VALUE]."
+    }
+  ],
+  "outputs": {
+    "savings_balance_cents": "[REDACTED]",
+    "currency": "[REDACTED]"
+  },
+  "artifact": "capabilities/lookup_member_savings.generated.json",
+  "screenshot": "evidence/discovery-1dc20d7d1483-final.png",
+  "raw_model_transcript_persisted": false
+}

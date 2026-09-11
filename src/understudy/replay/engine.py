@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from understudy.artifact.models import CapabilityArtifact, Step
 from understudy.replay.actions import ActionExecutor
@@ -36,11 +37,19 @@ class ReplayPolicyError(RuntimeError):
 
 
 class StepExecutionError(RuntimeError):
-    def __init__(self, step_id: str, attempts: int) -> None:
+    def __init__(
+        self,
+        step_id: str,
+        attempts: int,
+        cause: Exception | None,
+    ) -> None:
         self.step_id = step_id
         self.attempts = attempts
+        self.cause_type = type(cause).__name__ if cause else None
+        self.observed = str(cause) if cause else "unknown execution failure"
         super().__init__(
-            f"step {step_id!r} failed after {attempts} attempt(s)"
+            f"step {step_id!r} failed after {attempts} attempt(s): "
+            f"{self.observed}"
         )
 
 
@@ -177,6 +186,7 @@ class ReplayEngine:
         raise StepExecutionError(
             step.id,
             attempts_made,
+            last_error,
         ) from last_error
 
     @staticmethod
@@ -210,6 +220,7 @@ class ReplayEngine:
     ) -> None:
         artifact = self._artifact
         policy = artifact.policy_requirements
+        invocation = ReplayContext(inputs=inputs, runtime=runtime)
 
         if len(artifact.steps) > policy.maximum_steps:
             raise ReplayPolicyError("artifact exceeds maximum_steps")
@@ -232,6 +243,19 @@ class ReplayEngine:
                     f"missing required runtime binding {name!r}"
                 )
 
+        allowed_origins = {
+            self._origin(invocation.render(origin))
+            for origin in policy.allowed_origins
+        }
+
+        for route_ref in policy.allowed_route_refs:
+            route = artifact.target.routes[route_ref]
+            route_url = invocation.render(route.pattern)
+            if self._origin(route_url) not in allowed_origins:
+                raise ReplayPolicyError(
+                    f"route {route_ref!r} is outside allowed origins"
+                )
+
         for step in artifact.steps:
             if step.action.type not in policy.allowed_action_types:
                 raise ReplayPolicyError(
@@ -251,6 +275,18 @@ class ReplayEngine:
                 raise ReplayPolicyError(
                     f"route {route_ref!r} is not allowed"
                 )
+
+    @staticmethod
+    def _origin(url: str) -> str:
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ReplayPolicyError(f"invalid web origin in {url!r}")
+        return f"{parsed.scheme}://{parsed.netloc}"
 
     def _enforce_runtime_budget(self, started_at: float) -> None:
         if self._remaining_runtime_ms(started_at) <= 0:

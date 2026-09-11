@@ -1,0 +1,39 @@
+{
+  "run_id": "replay-0b99a35ce4ff",
+  "kind": "deterministic_replay",
+  "recorded_at": "2026-09-11T20:57:44.647710+00:00",
+  "capability_id": "lookup_member_savings",
+  "capability_version": "1.0.0",
+  "status": "business_outcome",
+  "condition_code": "MEMBER_NOT_FOUND",
+  "message": "No member exists for the supplied identifier.",
+  "completed_steps": [
+    {
+      "step_id": "navigate_to_member_search",
+      "intent": "Open the member-search application.",
+      "action_type": "navigate",
+      "risk": "safe_read",
+      "outcome": "postcondition_met",
+      "why": "artifact-defined intent and policy-approved action"
+    },
+    {
+      "step_id": "enter_member_id",
+      "intent": "Enter the requested member identifier.",
+      "action_type": "enter_text",
+      "risk": "safe_reversible",
+      "outcome": "postcondition_met",
+      "why": "artifact-defined intent and policy-approved action"
+    },
+    {
+      "step_id": "activate_member_search",
+      "intent": "Submit the read-only member search.",
+      "action_type": "activate",
+      "risk": "safe_read",
+      "outcome": "postcondition_met",
+      "why": "artifact-defined intent and policy-approved action"
+    }
+  ],
+  "outputs": {},
+  "runtime_inputs_persisted": false,
+  "model_in_decision_loop": false
+}

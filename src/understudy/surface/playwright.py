@@ -87,10 +87,10 @@ class PlaywrightWebSurface:
         self._handle(target).click()
 
     def press_key(
-    self,
-    key: str,
-    target: ResolvedTarget | None = None,
-) -> None:
+        self,
+        key: str,
+        target: ResolvedTarget | None = None,
+    ) -> None:
         if target is None:
             self._page.keyboard.press(key)
         else:

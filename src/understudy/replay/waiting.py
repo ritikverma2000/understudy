@@ -80,7 +80,8 @@ class ConditionWaiter:
             if condition_met:
                 return
 
-            # Runtime-condition evaluation will be connected here.
+            # Exceptional states must be observed while the page is changing,
+            # rather than only after this condition times out.
             if during_wait is not None:
                 during_wait()
 

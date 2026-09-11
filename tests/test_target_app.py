@@ -26,6 +26,17 @@ def test_search_page_matches_the_artifact_contract() -> None:
     assert b"data-testid" not in response.data
 
 
+def test_expired_session_injection_supports_handoff_demo() -> None:
+    client = create_app(testing=True).test_client()
+
+    shell = client.get("/app?inject=expired")
+    expired = client.get("/workspace/search?inject=expired")
+
+    assert b'src="/workspace/search?inject=expired"' in shell.data
+    assert b"Your session has expired" in expired.data
+    assert b">Resume session</a>" in expired.data
+
+
 def test_known_member_appears_in_search_results() -> None:
     client = create_app(testing=True).test_client()
 

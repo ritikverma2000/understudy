@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from understudy import cli
+from understudy.discovery import DiscoveryResult
 from understudy.replay import ReplayResult
 
 
@@ -47,11 +48,13 @@ def test_replay_passes_arguments_to_browser_boundary(
         inputs: dict[str, str],
         runtime: dict[str, str],
         headed: bool,
+        evidence_dir: Path | None,
     ) -> ReplayResult:
         captured.update(
             inputs=inputs,
             runtime=runtime,
             headed=headed,
+            evidence_dir=evidence_dir,
             capability_id=artifact.capability.id,
         )
         return ReplayResult(
@@ -82,6 +85,7 @@ def test_replay_passes_arguments_to_browser_boundary(
         "inputs": {"member_id": "00123"},
         "runtime": {"base_url": "http://127.0.0.1:5000"},
         "headed": True,
+        "evidence_dir": None,
         "capability_id": "lookup_member_savings",
     }
     assert output_json(capsys)["status"] == "success"
@@ -199,3 +203,85 @@ def test_duplicate_assignment_is_rejected(
     assert exit_code == 1
     assert not called
     assert "duplicate input" in output_json(capsys)["message"]
+
+
+def test_discover_passes_goal_and_target_to_boundary(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_discovery(template: Any, **kwargs: Any) -> DiscoveryResult:
+        captured.update(kwargs)
+        return DiscoveryResult(
+            run_id="discovery-test",
+            artifact_path=tmp_path / "generated.json",
+            evidence_path=tmp_path / "discovery-run.json",
+            screenshot_path=tmp_path / "final.png",
+            steps=5,
+            provider="test-provider",
+            model="test-model",
+        )
+
+    monkeypatch.setattr(cli, "execute_discovery", fake_discovery)
+    output = tmp_path / "generated.json"
+    evidence = tmp_path / "evidence"
+    exit_code = cli.main(
+        [
+            "discover",
+            "--goal",
+            "Look up member 00123",
+            "--target",
+            "http://127.0.0.1:5000/app",
+            "--template",
+            str(FIXTURE_PATH),
+            "--input",
+            "member_id=00123",
+            "--output",
+            str(output),
+            "--evidence-dir",
+            str(evidence),
+            "--model",
+            "test-model",
+            "--provider",
+            "openrouter",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["goal"] == "Look up member 00123"
+    assert captured["target_url"] == "http://127.0.0.1:5000/app"
+    assert captured["inputs"] == {"member_id": "00123"}
+    assert captured["provider_name"] == "openrouter"
+    assert output_json(capsys)["run_id"] == "discovery-test"
+
+
+def test_handoff_demo_reports_returned_control(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "handoff-run.json"
+    monkeypatch.setattr(
+        cli,
+        "execute_handoff_demo",
+        lambda **kwargs: evidence_path,
+    )
+
+    exit_code = cli.main(
+        [
+            "handoff-demo",
+            "--target",
+            "http://127.0.0.1:5000/app?inject=expired",
+            "--evidence-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert output_json(capsys) == {
+        "status": "success",
+        "evidence": str(evidence_path),
+        "owner": "automation",
+    }

@@ -1,0 +1,58 @@
+{
+  "run_id": "replay-be0a2088c364",
+  "kind": "deterministic_replay",
+  "recorded_at": "2026-09-11T20:56:36.316869+00:00",
+  "capability_id": "lookup_member_savings",
+  "capability_version": "1.0.0",
+  "status": "success",
+  "condition_code": null,
+  "message": null,
+  "completed_steps": [
+    {
+      "step_id": "navigate_to_member_search",
+      "intent": "Open the member-search application.",
+      "action_type": "navigate",
+      "risk": "safe_read",
+      "outcome": "postcondition_met",
+      "why": "artifact-defined intent and policy-approved action"
+    },
+    {
+      "step_id": "enter_member_id",
+      "intent": "Enter the requested member identifier.",
+      "action_type": "enter_text",
+      "risk": "safe_reversible",
+      "outcome": "postcondition_met",
+      "why": "artifact-defined intent and policy-approved action"
+    },
+    {
+      "step_id": "activate_member_search",
+      "intent": "Submit the read-only member search.",
+      "action_type": "activate",
+      "risk": "safe_read",
+      "outcome": "postcondition_met",
+      "why": "artifact-defined intent and policy-approved action"
+    },
+    {
+      "step_id": "open_matching_member",
+      "intent": "Open the matching member record.",
+      "action_type": "activate",
+      "risk": "safe_read",
+      "outcome": "postcondition_met",
+      "why": "artifact-defined intent and policy-approved action"
+    },
+    {
+      "step_id": "read_savings_balance",
+      "intent": "Read and parse the Savings account balance.",
+      "action_type": "read",
+      "risk": "safe_read",
+      "outcome": "postcondition_met",
+      "why": "artifact-defined intent and policy-approved action"
+    }
+  ],
+  "outputs": {
+    "savings_balance_cents": "[REDACTED]",
+    "currency": "USD"
+  },
+  "runtime_inputs_persisted": false,
+  "model_in_decision_loop": false
+}

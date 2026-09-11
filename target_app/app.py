@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from flask import Flask, abort, render_template, request
+from flask import Flask, abort, render_template, request, url_for
 
 from target_app.data import MEMBERS
 
@@ -26,10 +26,17 @@ def create_app(*, testing: bool = False) -> Flask:
 
     @app.get("/app")
     def app_shell() -> str:
-        return render_template("app_shell.html")
+        inject = request.args.get("inject")
+        workspace_src = url_for("member_search", inject=inject)
+        return render_template(
+            "app_shell.html",
+            workspace_src=workspace_src,
+        )
 
     @app.get("/workspace/search")
     def member_search() -> str:
+        if request.args.get("inject") == "expired":
+            return render_template("session_expired.html")
         return render_template("member_search.html")
 
     @app.get("/workspace/results")

@@ -1,0 +1,850 @@
+{
+  "schema_version": "1.0.0",
+  "capability": {
+    "id": "lookup_member_savings",
+    "name": "Look up member savings balance",
+    "description": "Find a member through the user interface and return their current savings balance.",
+    "version": "1.0.0",
+    "approval_state": "draft",
+    "risk_class": "safe_read"
+  },
+  "target": {
+    "surface_kind": "web",
+    "app_family": "coreview_demo",
+    "compatible_app_versions": [
+      "1.x"
+    ],
+    "runtime_bindings": {
+      "base_url": {
+        "type": "url",
+        "required": true
+      }
+    },
+    "routes": {
+      "app_shell": {
+        "pattern": "{{runtime.base_url}}/app",
+        "usage": "entry_point"
+      },
+      "member_search": {
+        "pattern": "{{runtime.base_url}}/workspace/search",
+        "usage": "expected_navigation"
+      },
+      "member_results": {
+        "pattern": "{{runtime.base_url}}/workspace/results",
+        "usage": "expected_navigation"
+      },
+      "member_detail": {
+        "pattern": "{{runtime.base_url}}/workspace/member/{{inputs.member_id}}",
+        "usage": "expected_navigation"
+      }
+    },
+    "entry_point": {
+      "route_ref": "app_shell"
+    }
+  },
+  "surface_contexts": {
+    "member_workspace": {
+      "kind": "web_frame",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "workspace_frame_name",
+          "kind": "attribute",
+          "attribute": "name",
+          "value": "memberWorkspace",
+          "value_template": null
+        },
+        {
+          "id": "workspace_frame_css",
+          "kind": "css",
+          "value": "iframe[name='memberWorkspace']"
+        }
+      ],
+      "rationale": "The workspace frame is resolved as a first-class context rather than a path string, so a per-tenant override of the frame is a single change that every target inside it inherits. On a desktop surface this same slot resolves to a window or pane handle."
+    }
+  },
+  "inputs": {
+    "member_id": {
+      "type": "string",
+      "description": "Five-digit member identifier. It is a string so leading zeros are preserved.",
+      "required": true,
+      "pattern": "^[0-9]{5}$",
+      "sensitivity": "pii",
+      "log_policy": "redact"
+    }
+  },
+  "outputs": {
+    "savings_balance_cents": {
+      "type": "integer",
+      "description": "Savings balance represented in the smallest currency unit.",
+      "required": true,
+      "enum": null,
+      "sensitivity": "financial",
+      "persistence": "return_only",
+      "log_policy": "redact"
+    },
+    "currency": {
+      "type": "string",
+      "description": "ISO 4217 currency code.",
+      "required": true,
+      "enum": [
+        "USD"
+      ],
+      "sensitivity": "public",
+      "persistence": "return_only",
+      "log_policy": "allow"
+    }
+  },
+  "targets": {
+    "member_search_heading": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "actionable",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "member_search_heading_accessibility",
+          "kind": "accessibility",
+          "role": "heading",
+          "name": "Member Search",
+          "match": "exact"
+        },
+        {
+          "id": "member_search_heading_text",
+          "kind": "text",
+          "value": "Member Search",
+          "value_from": null,
+          "match": "exact",
+          "within_css": "#content"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "member_search_heading_accessibility",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "fail"
+      },
+      "rationale": "The heading role is inferred by the browser from the h1 element with no ARIA present, which is the situation on a legacy surface."
+    },
+    "member_id_input": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "actionable",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "member_id_input_accessibility",
+          "kind": "accessibility",
+          "role": "textbox",
+          "name": "Member ID",
+          "match": "exact"
+        },
+        {
+          "id": "member_id_input_name",
+          "kind": "attribute",
+          "attribute": "name",
+          "value": "f_003",
+          "value_template": null
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "member_id_input_accessibility",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "fail"
+      },
+      "rationale": "The accessible name comes from the label-for association, which expresses purpose. The form field name is vendor-generated and may differ between tenant versions, so it is a fallback only."
+    },
+    "search_control": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "actionable",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "search_control_accessibility",
+          "kind": "accessibility",
+          "role": "link",
+          "name": "Search",
+          "match": "exact"
+        },
+        {
+          "id": "search_control_text",
+          "kind": "text",
+          "value": "Search",
+          "value_from": null,
+          "match": "exact",
+          "within_css": "form[name='member-search']"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "search_control_accessibility",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "fail"
+      },
+      "rationale": "The control is an anchor with an onclick submit handler, so its inferred role is link rather than button. The artifact records what the surface actually exposes rather than what a modern app would expose."
+    },
+    "search_results_heading": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "actionable",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "results_heading_accessibility",
+          "kind": "accessibility",
+          "role": "heading",
+          "name": "Member Search Results",
+          "match": "exact"
+        },
+        {
+          "id": "results_heading_text",
+          "kind": "text",
+          "value": "Member Search Results",
+          "value_from": null,
+          "match": "exact",
+          "within_css": "#content"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "results_heading_accessibility",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "fail"
+      },
+      "rationale": null
+    },
+    "member_result_link": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "actionable",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "member_result_table_relation",
+          "kind": "table_relation",
+          "table_anchor": "Member Search Results",
+          "row_match": {
+            "kind": "column_value",
+            "column_header": "Member ID",
+            "equals": null,
+            "equals_from": "inputs.member_id"
+          },
+          "select": {
+            "kind": "descendant",
+            "role": "link",
+            "name": "View details",
+            "match": "exact"
+          }
+        },
+        {
+          "id": "member_result_href",
+          "kind": "attribute",
+          "attribute": "href",
+          "value": null,
+          "value_template": "/workspace/member/{{inputs.member_id}}"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "member_result_table_relation",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "fail"
+      },
+      "rationale": "The primary locator expresses the human-visible relationship between the requested identifier, its result row, and that row's action. Row index is never used."
+    },
+    "member_detail_heading": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "actionable",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "detail_heading_accessibility",
+          "kind": "accessibility",
+          "role": "heading",
+          "name": "Member Details",
+          "match": "exact"
+        },
+        {
+          "id": "detail_heading_text",
+          "kind": "text",
+          "value": "Member Details",
+          "value_from": null,
+          "match": "exact",
+          "within_css": "#content"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "detail_heading_accessibility",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "fail"
+      },
+      "rationale": null
+    },
+    "displayed_member_id": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "actionable",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "displayed_member_id_table_relation",
+          "kind": "table_relation",
+          "table_anchor": "Member Details",
+          "row_match": {
+            "kind": "row_label",
+            "label": "Member ID",
+            "match": "exact"
+          },
+          "select": {
+            "kind": "cell",
+            "column_header": "Value"
+          }
+        },
+        {
+          "id": "displayed_member_id_text",
+          "kind": "text",
+          "value": null,
+          "value_from": "inputs.member_id",
+          "match": "exact",
+          "within_css": "table[name='member-details']"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "displayed_member_id_table_relation",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "fail"
+      },
+      "rationale": "The detail table is a key-value layout, so the row is matched by its label rather than by a column value. The value must be bound to the Member ID label so the identity checkpoint cannot pass against unrelated page text."
+    },
+    "savings_balance_cell": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "actionable",
+      "expected_matches": {
+        "min": 1,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "savings_balance_table_relation",
+          "kind": "table_relation",
+          "table_anchor": "Accounts",
+          "row_match": {
+            "kind": "column_value",
+            "column_header": "Account type",
+            "equals": "Savings",
+            "equals_from": null
+          },
+          "select": {
+            "kind": "cell",
+            "column_header": "Current balance"
+          }
+        },
+        {
+          "id": "savings_balance_css",
+          "kind": "css",
+          "value": "table[name='accounts'] tr.savings td.balance"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "savings_balance_table_relation",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "fail"
+      },
+      "rationale": "The balance is located by account type and column meaning. The accounts table holds several rows, so a positional locator would silently return the wrong account."
+    },
+    "member_not_found_message": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "detectable",
+      "expected_matches": {
+        "min": 0,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "member_not_found_text",
+          "kind": "text",
+          "value": "No matching member",
+          "value_from": null,
+          "match": "contains",
+          "within_css": "#content"
+        },
+        {
+          "id": "member_not_found_css",
+          "kind": "css",
+          "value": "#content .message.error"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "member_not_found_text",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "condition_not_present"
+      },
+      "rationale": "Legacy surfaces render messages as plain styled text with no alert semantics, so text scoped to the content region is the strongest signal available. Absence of this target is the normal case and is not a resolution failure."
+    },
+    "loading_message": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "detectable",
+      "expected_matches": {
+        "min": 0,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "loading_message_text",
+          "kind": "text",
+          "value": "Loading member records",
+          "value_from": null,
+          "match": "contains",
+          "within_css": "#content"
+        },
+        {
+          "id": "loading_message_css",
+          "kind": "css",
+          "value": "#content .loading"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "loading_message_text",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "condition_not_present"
+      },
+      "rationale": null
+    },
+    "session_expired_message": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "detectable",
+      "expected_matches": {
+        "min": 0,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "session_expired_text",
+          "kind": "text",
+          "value": "Your session has expired",
+          "value_from": null,
+          "match": "contains",
+          "within_css": "#content"
+        },
+        {
+          "id": "session_expired_css",
+          "kind": "css",
+          "value": "#content .session-expired"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "session_expired_text",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "condition_not_present"
+      },
+      "rationale": null
+    },
+    "application_error_message": {
+      "context_ref": "member_workspace",
+      "role_in_flow": "detectable",
+      "expected_matches": {
+        "min": 0,
+        "max": 1
+      },
+      "strategies": [
+        {
+          "id": "application_error_text",
+          "kind": "text",
+          "value": "Application error",
+          "value_from": null,
+          "match": "contains",
+          "within_css": "#content"
+        },
+        {
+          "id": "application_error_css",
+          "kind": "css",
+          "value": "#content .application-error"
+        }
+      ],
+      "drift_policy": {
+        "primary_strategy_id": "application_error_text",
+        "fallback_resolution": "mark_degraded",
+        "no_resolution": "condition_not_present"
+      },
+      "rationale": null
+    }
+  },
+  "runtime_conditions": [
+    {
+      "code": "SESSION_EXPIRED",
+      "classification": "intervention_required",
+      "priority": 120,
+      "check_phases": [
+        "during_wait",
+        "after_step"
+      ],
+      "detect": {
+        "kind": "visible",
+        "target_ref": "session_expired_message"
+      },
+      "terminal": false,
+      "intervention": {
+        "reason": "The session requires human reauthentication. Credentials and MFA are outside automation policy.",
+        "control_transfer": "same_live_session",
+        "resume_condition": {
+          "kind": "not_visible",
+          "target_ref": "session_expired_message"
+        }
+      }
+    },
+    {
+      "code": "APPLICATION_ERROR",
+      "classification": "hard_failure",
+      "priority": 110,
+      "check_phases": [
+        "during_wait",
+        "after_step"
+      ],
+      "detect": {
+        "kind": "visible",
+        "target_ref": "application_error_message"
+      },
+      "terminal": true,
+      "failure": {
+        "category": "target_application",
+        "retryable": false,
+        "capture_evidence": [
+          "screenshot",
+          "dom_snapshot"
+        ]
+      }
+    },
+    {
+      "code": "MEMBER_NOT_FOUND",
+      "classification": "business_outcome",
+      "priority": 100,
+      "check_phases": [
+        "after_step"
+      ],
+      "detect": {
+        "kind": "visible",
+        "target_ref": "member_not_found_message"
+      },
+      "terminal": true,
+      "result": {
+        "status": "business_outcome",
+        "message": "No member exists for the supplied identifier."
+      }
+    },
+    {
+      "code": "TRANSIENT_LOADING",
+      "classification": "recoverable",
+      "priority": 50,
+      "check_phases": [
+        "during_wait"
+      ],
+      "detect": {
+        "kind": "visible",
+        "target_ref": "loading_message"
+      },
+      "terminal": false,
+      "recovery": {
+        "kind": "wait_until_hidden",
+        "target_ref": "loading_message",
+        "timeout_ms": 5000,
+        "max_attempts": 2,
+        "on_exhausted": "fail_transient_timeout"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id": "navigate_to_member_search",
+      "intent": "Open the member-search application.",
+      "action": {
+        "type": "navigate",
+        "route_ref": "app_shell"
+      },
+      "risk": "safe_read",
+      "precondition": {
+        "kind": "runtime_binding_present",
+        "binding": "base_url"
+      },
+      "postcondition": {
+        "kind": "visible",
+        "target_ref": "member_search_heading"
+      },
+      "runtime_condition_check": null,
+      "timeout_ms": 10000,
+      "retry": {
+        "max_attempts": 2,
+        "idempotent": true,
+        "retry_action": true,
+        "retry_on": [
+          "transient_navigation_failure"
+        ],
+        "backoff_ms": [
+          250,
+          750
+        ]
+      }
+    },
+    {
+      "id": "enter_member_id",
+      "intent": "Enter the requested member identifier.",
+      "action": {
+        "type": "enter_text",
+        "target_ref": "member_id_input",
+        "value_from": "inputs.member_id"
+      },
+      "risk": "safe_reversible",
+      "precondition": {
+        "kind": "enabled",
+        "target_ref": "member_id_input"
+      },
+      "postcondition": {
+        "kind": "element_value_equals",
+        "target_ref": "member_id_input",
+        "source": "value",
+        "value_from": "inputs.member_id",
+        "log_policy": "redact"
+      },
+      "runtime_condition_check": null,
+      "timeout_ms": 5000,
+      "retry": {
+        "max_attempts": 2,
+        "idempotent": true,
+        "retry_action": true,
+        "retry_on": [
+          "target_temporarily_unavailable",
+          "postcondition_not_met"
+        ],
+        "backoff_ms": [
+          250,
+          500
+        ]
+      }
+    },
+    {
+      "id": "activate_member_search",
+      "intent": "Submit the read-only member search.",
+      "action": {
+        "type": "activate",
+        "target_ref": "search_control"
+      },
+      "risk": "safe_read",
+      "precondition": {
+        "kind": "enabled",
+        "target_ref": "search_control"
+      },
+      "postcondition": {
+        "kind": "visible",
+        "target_ref": "search_results_heading"
+      },
+      "runtime_condition_check": null,
+      "timeout_ms": 10000,
+      "retry": {
+        "max_attempts": 2,
+        "idempotent": true,
+        "retry_action": false,
+        "retry_on": [
+          "postcondition_not_met_while_loading"
+        ],
+        "backoff_ms": [
+          500,
+          1000
+        ]
+      }
+    },
+    {
+      "id": "open_matching_member",
+      "intent": "Open the matching member record.",
+      "action": {
+        "type": "activate",
+        "target_ref": "member_result_link"
+      },
+      "risk": "safe_read",
+      "precondition": {
+        "kind": "visible",
+        "target_ref": "member_result_link"
+      },
+      "postcondition": {
+        "kind": "all",
+        "conditions": [
+          {
+            "kind": "visible",
+            "target_ref": "member_detail_heading"
+          },
+          {
+            "kind": "element_value_equals",
+            "target_ref": "displayed_member_id",
+            "source": "text",
+            "value_from": "inputs.member_id",
+            "log_policy": "redact"
+          }
+        ]
+      },
+      "runtime_condition_check": null,
+      "timeout_ms": 10000,
+      "retry": {
+        "max_attempts": 2,
+        "idempotent": true,
+        "retry_action": false,
+        "retry_on": [
+          "postcondition_not_met_while_loading"
+        ],
+        "backoff_ms": [
+          500,
+          1000
+        ]
+      }
+    },
+    {
+      "id": "read_savings_balance",
+      "intent": "Read and parse the Savings account balance.",
+      "action": {
+        "type": "read",
+        "target_ref": "savings_balance_cell",
+        "parser": {
+          "kind": "money",
+          "locale": "en-US",
+          "expected_currency": "USD",
+          "amount_output": "savings_balance_cents",
+          "currency_output": "currency"
+        }
+      },
+      "risk": "safe_read",
+      "precondition": {
+        "kind": "visible",
+        "target_ref": "savings_balance_cell"
+      },
+      "postcondition": {
+        "kind": "all",
+        "conditions": [
+          {
+            "kind": "output_matches",
+            "output": "savings_balance_cents",
+            "type": "integer",
+            "equals": null
+          },
+          {
+            "kind": "output_matches",
+            "output": "currency",
+            "type": "string",
+            "equals": "USD"
+          }
+        ]
+      },
+      "runtime_condition_check": null,
+      "timeout_ms": 5000,
+      "retry": {
+        "max_attempts": 2,
+        "idempotent": true,
+        "retry_action": true,
+        "retry_on": [
+          "target_temporarily_unavailable",
+          "parse_failed"
+        ],
+        "backoff_ms": [
+          250,
+          500
+        ]
+      }
+    }
+  ],
+  "success_checkpoint": {
+    "description": "Verifies the capability's contract to its caller: the correct member record is on screen and every declared output has been populated with a well-formed value. Step postconditions verify local transitions; this verifies the promise made to the calling agent.",
+    "condition": {
+      "kind": "all",
+      "conditions": [
+        {
+          "kind": "visible",
+          "target_ref": "member_detail_heading"
+        },
+        {
+          "kind": "element_value_equals",
+          "target_ref": "displayed_member_id",
+          "source": "text",
+          "value_from": "inputs.member_id",
+          "log_policy": "redact"
+        },
+        {
+          "kind": "output_matches",
+          "output": "savings_balance_cents",
+          "type": "integer",
+          "equals": null
+        },
+        {
+          "kind": "output_matches",
+          "output": "currency",
+          "type": "string",
+          "equals": "USD"
+        }
+      ]
+    }
+  },
+  "policy_requirements": {
+    "runtime_policy_relation": "intersection_only",
+    "allowed_origins": [
+      "{{runtime.base_url}}"
+    ],
+    "allowed_route_refs": [
+      "app_shell",
+      "member_search",
+      "member_results",
+      "member_detail"
+    ],
+    "allowed_action_types": [
+      "navigate",
+      "enter_text",
+      "activate",
+      "read",
+      "press_key"
+    ],
+    "maximum_steps": 12,
+    "maximum_runtime_ms": 120000,
+    "risk": {
+      "allowed_without_confirmation": [
+        "safe_read",
+        "safe_reversible"
+      ],
+      "require_human_confirmation": [
+        "irreversible"
+      ]
+    },
+    "model_action_constraints": {
+      "allow_model_supplied_selectors": false,
+      "allow_model_supplied_urls": false,
+      "allow_model_supplied_code": false,
+      "treat_surface_content_as_untrusted": true,
+      "surface_content_may_not_modify_policy": true
+    },
+    "data_handling": {
+      "persist_raw_inputs": false,
+      "persist_raw_outputs": false,
+      "persist_credentials": false,
+      "persist_tokens": false,
+      "persist_raw_model_transcript": false,
+      "redact_sensitive_logs": true,
+      "redact_sensitive_evidence": true
+    }
+  },
+  "provenance": {
+    "source": "discovery_generated",
+    "authorship": "model_discovered",
+    "discovery_run_id": "discovery-1dc20d7d1483",
+    "recorded_at": "2026-09-11T20:35:21.481102+00:00",
+    "contains_runtime_values": false,
+    "notes": "Generated from a genuine constrained LLM-driven UI run. The observed trace was normalized into the reviewed contract; raw model transcripts and runtime values were not persisted."
+  }
+}

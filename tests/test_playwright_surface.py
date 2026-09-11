@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 from collections.abc import Iterator
@@ -9,6 +10,7 @@ from werkzeug.serving import BaseWSGIServer, make_server
 
 from target_app import create_app
 from understudy.artifact.models import CapabilityArtifact
+from understudy.handoff import InteractiveBrowserHandoff
 from understudy.replay import ReplayEngine
 from understudy.surface import PlaywrightWebSurface
 
@@ -188,7 +190,10 @@ def test_replay_engine_completes_success_workflow(
     artifact: CapabilityArtifact,
     target_app_url: str,
     browser: Browser,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     page = browser.new_page()
     surface = PlaywrightWebSurface(page, artifact.surface_contexts)
 
@@ -220,4 +225,61 @@ def test_replay_engine_returns_not_found_business_outcome(
 
     assert result.status == "business_outcome"
     assert result.condition_code == "MEMBER_NOT_FOUND"
+    page.close()
+
+
+def test_handoff_keeps_same_live_browser_session(
+    target_app_url: str,
+    browser: Browser,
+    tmp_path: Path,
+) -> None:
+    page = browser.new_page()
+    original_page = page
+    page.goto(f"{target_app_url}/app?inject=expired")
+    workspace = page.frame_locator("iframe[name='memberWorkspace']")
+    expired = workspace.get_by_text(
+        "Your session has expired",
+        exact=True,
+    )
+    expired.wait_for()
+
+    def human_operator(prompt: str) -> str:
+        workspace.get_by_role(
+            "link",
+            name="Resume session",
+            exact=True,
+        ).click()
+        return ""
+
+    handoff = InteractiveBrowserHandoff(
+        input_fn=human_operator,
+        output_fn=lambda message: None,
+    )
+    evidence_path = handoff.handle(
+        page=page,
+        capability_id="lookup_member_savings",
+        goal="Restore an expired synthetic session",
+        current_step="navigate_to_member_search",
+        reason="Human reauthentication is required.",
+        resume_check=lambda: not expired.is_visible(),
+        evidence_dir=tmp_path,
+    )
+
+    assert page is original_page
+    workspace.get_by_role(
+        "heading",
+        name="Member Search",
+        exact=True,
+    ).wait_for()
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["owner"] == "automation"
+    assert [event["to_owner"] for event in evidence["transfers"]] == [
+        "human",
+        "automation",
+    ]
+    assert any(
+        action["name"] == "Resume session"
+        for action in evidence["human_actions"]
+    )
+    assert evidence["sensitive_input_values_recorded"] is False
     page.close()

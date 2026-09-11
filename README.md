@@ -1,60 +1,184 @@
 # Understudy
 
-Understudy is a record-once, replay-many computer-use automation system.
+Understudy is a small record-once, replay-many computer-use system. An LLM
+drives a live, intentionally legacy-style banking UI during discovery. The
+successful run is normalized into a typed capability artifact. Later calls
+replay that artifact with Playwright and no model in the decision loop.
 
-An LLM discovers how to perform a workflow through a live user interface.
-Understudy records that run as a typed capability artifact and subsequently
-replays it deterministically without an LLM in the decision loop.
+The implemented vertical slice accepts a member ID, searches a synthetic core
+banking application, opens the matching member, and returns the Savings balance
+as integer cents plus an ISO currency code. It also demonstrates a typed
+not-found business outcome, transient-condition handling, policy enforcement,
+sanitized evidence, and same-session human handoff for an expired session.
 
-## Status
+This repository contains synthetic data only. Do not enter real credentials,
+customer data, tokens, or PII into the sample application.
 
-Work in progress. The repository currently contains:
+## Architecture at a glance
 
-- a strict, cross-reference-validated capability artifact contract;
-- a hand-authored member-savings fixture;
-- a legacy-style Flask target application;
-- a platform-neutral surface contract with a Playwright web adapter;
-- a deterministic replay engine with policy gates, condition polling,
-  runtime-condition handling, retries, and typed output extraction; and
-- a JSON-producing CLI for artifact validation and replay.
+- `src/understudy/discovery/` is the LLM-driven observe → decide → act path.
+  It sends accessible control descriptions and temporary control IDs to the
+  model, then executes only a constrained action schema.
+- `src/understudy/artifact/` contains the strict, versioned Pydantic contract
+  and cross-reference validation.
+- `src/understudy/surface/` separates semantic replay operations from the
+  Playwright web implementation.
+- `src/understudy/replay/` is the deterministic production path: policy gate,
+  target resolution, actions, condition polling, runtime outcomes, retries,
+  checkpoint verification, and typed parsing.
+- `src/understudy/handoff.py` owns the explicit automation/human control lease
+  and records operator actions in the same browser session.
+- `target_app/` is a local Flask proxy for a legacy core-banking UI. It uses an
+  iframe, server-rendered forms, tables, unstable-looking field names, and no
+  test IDs.
+- `tests/fixtures/lookup_member_savings.hand-authored.json` is the permanent,
+  reviewed test fixture. A real generated artifact belongs under
+  `capabilities/`; the two files have different jobs and both are retained.
 
-## CLI
+See [REPORT.md](REPORT.md) for design decisions and trade-offs.
 
-Validate the permanent hand-authored fixture:
+## Setup
+
+Python 3.11 or newer is required. The following uses the existing Conda
+environment name used during development; a virtualenv works equally well.
 
 ```bash
-understudy validate \
-  tests/fixtures/lookup_member_savings.hand-authored.json
+cd understudy
+conda activate understudy
+python -m pip install -e '.[dev]'
+playwright install chromium
 ```
 
-Start the target application in one terminal:
+Only discovery needs a model key. Understudy supports Anthropic directly and
+tool-capable models through OpenRouter; neither path requires a provider SDK.
+
+For OpenRouter, create a key at <https://openrouter.ai/settings/keys>, ensure
+the account has credit, and export it only in the terminal that will run
+discovery:
 
 ```bash
+export OPENROUTER_API_KEY='your-openrouter-key'
+python -c "import os; print('configured' if os.getenv('OPENROUTER_API_KEY') else 'missing')"
+```
+
+The default pinned OpenRouter model is `nex-agi/nex-n2.5-pro:free`, a free
+model that currently advertises `tools` and `tool_choice` support. A pinned
+model makes discovery evidence more reviewable than the random
+`openrouter/free` router. Free-model availability and rate limits can vary; a
+paid Claude model remains available as an explicit override.
+
+To use Anthropic directly instead:
+
+```bash
+export ANTHROPIC_API_KEY='your-key'
+```
+
+Never commit `.env` files or keys. Validation, deterministic replay, and all
+non-discovery tests run without any model key or live service.
+
+## End-to-end demo
+
+Start the synthetic application in terminal 1:
+
+```bash
+cd understudy
+conda activate understudy
 python -m target_app.app
 ```
 
-Replay a successful lookup from another terminal:
+In terminal 2, perform the required genuine LLM-driven discovery run:
+
+```bash
+cd understudy
+conda activate understudy
+understudy discover \
+  --provider openrouter \
+  --model nex-agi/nex-n2.5-pro:free \
+  --goal 'Look up member 00123 and read the current Savings balance' \
+  --target http://127.0.0.1:5000/app \
+  --template tests/fixtures/lookup_member_savings.hand-authored.json \
+  --input member_id=00123 \
+  --output capabilities/lookup_member_savings.generated.json \
+  --evidence-dir evidence
+```
+
+The model selects controls from fresh live observations; the runner types,
+clicks, and reads the real UI. It writes a generated capability, a sanitized
+decision log, an artifact copy, and a final screenshot. `--model` can override
+the provider-specific default, and `--headed` makes the browser visible. The
+`--model` option may be omitted for the documented defaults. For paid Claude
+through OpenRouter, use `--model anthropic/claude-4.6-sonnet`; for direct
+Anthropic access, use `--provider anthropic --model claude-sonnet-4-6`.
+
+Validate the generated artifact, then prove replay does not require the key:
+
+```bash
+understudy validate capabilities/lookup_member_savings.generated.json
+unset ANTHROPIC_API_KEY
+unset OPENROUTER_API_KEY
+understudy replay \
+  capabilities/lookup_member_savings.generated.json \
+  --input member_id=00123 \
+  --runtime base_url=http://127.0.0.1:5000 \
+  --evidence-dir evidence
+```
+
+Expected outputs are `savings_balance_cents: 125050` and `currency: USD`.
+The financial value is returned to the caller but redacted in persisted
+evidence according to the artifact's output policy.
+
+Exercise a legitimate business outcome rather than a crash:
 
 ```bash
 understudy replay \
-  tests/fixtures/lookup_member_savings.hand-authored.json \
-  --input member_id=00123 \
-  --runtime base_url=http://127.0.0.1:5000
+  capabilities/lookup_member_savings.generated.json \
+  --input member_id=99999 \
+  --runtime base_url=http://127.0.0.1:5000 \
+  --evidence-dir evidence
 ```
 
-Use `--headed` to watch the deterministic browser replay.
+The result has `status: business_outcome` and
+`condition_code: MEMBER_NOT_FOUND`.
 
-Run the deterministic test suite:
+## Human-handoff demo
+
+With the Flask app still running, start the interactive headed demo:
+
+```bash
+understudy handoff-demo --evidence-dir evidence
+```
+
+Understudy opens an injected expired-session state, pauses automation, records
+the owner as `human`, and leaves the same browser page open. Click **Resume
+session** in that browser, return to the terminal, and press Enter. Understudy
+verifies the resume condition, transfers ownership back to `automation`, and
+writes before/after screenshots plus `evidence/handoff-run.json`. Click/input
+events are recorded, but input values are never captured.
+
+## Tests
+
+Run the fast deterministic suite, which needs no key and no browser service:
 
 ```bash
 pytest -q
 ```
 
-Run the browser integration tests (requires Playwright Chromium):
+Run the complete suite, including real local-browser integration tests:
 
 ```bash
-UNDERSTUDY_E2E=1 pytest tests/test_playwright_surface.py -q
+UNDERSTUDY_E2E=1 pytest -q
 ```
 
-The replay engine executes artifact actions exclusively through the surface
-contract; no model participates in replay decisions.
+The E2E tests cover primary and fallback locator resolution, legitimate absence
+of detection-only targets, relational table targeting, successful replay,
+not-found handling, replay with both provider keys removed, and same-session
+handoff. If Chromium is missing, rerun `playwright install chromium`.
+
+## Useful commands
+
+```bash
+understudy --help
+understudy discover --help
+understudy replay --help
+understudy handoff-demo --help
+```

@@ -1,0 +1,34 @@
+{
+  "session_id": "handoff-8b9a310d639b",
+  "capability_id": "lookup_member_savings",
+  "goal": "Restore an expired synthetic member-servicing session",
+  "current_step": "navigate_to_member_search",
+  "reason": "The session requires human reauthentication.",
+  "owner": "automation",
+  "transfers": [
+    {
+      "at": "2026-09-11T20:59:00.089201+00:00",
+      "from_owner": "automation",
+      "to_owner": "human",
+      "actor": "system",
+      "reason": "The session requires human reauthentication."
+    },
+    {
+      "at": "2026-09-11T20:59:39.653439+00:00",
+      "from_owner": "human",
+      "to_owner": "automation",
+      "actor": "local-operator",
+      "reason": "operator signaled completion; resume condition verified"
+    }
+  ],
+  "human_actions": [
+    {
+      "event": "activate",
+      "role": "link",
+      "name": "Resume session"
+    }
+  ],
+  "before_screenshot": "evidence/handoff-8b9a310d639b-before.png",
+  "after_screenshot": "evidence/handoff-8b9a310d639b-after.png",
+  "sensitive_input_values_recorded": false
+}
