@@ -9,6 +9,72 @@ forms, nested tables, and opaque field names without test IDs. This exercises
 the same targeting and synchronization concerns that matter in older banking
 software without using a real institution or real data.
 
+## End-to-end system flow
+
+```mermaid
+flowchart TB
+    Request["Goal + typed inputs"]
+
+    subgraph Discovery["Discovery — LLM used once"]
+        Observe["Observe accessible controls<br/>across page and frames"]
+        Model["LLM chooses one typed action<br/>and an observed control ID"]
+        Guard["Validate action, target,<br/>step limit, and timeout"]
+        DiscoverSurface["Playwright discovery surface"]
+        Trace["Successful semantic trace"]
+
+        Observe --> Model --> Guard --> DiscoverSurface
+        DiscoverSurface --> Observe
+        Guard --> Trace
+    end
+
+    TargetApp["Synthetic legacy banking UI<br/>Flask + iframe + forms + tables"]
+    Compiler["Normalize trace into<br/>the reviewed schema"]
+    Artifact[("Versioned capability artifact")]
+    Review["Schema and cross-reference validation"]
+
+    Request --> Observe
+    DiscoverSurface <--> TargetApp
+    Trace --> Compiler --> Artifact --> Review
+
+    subgraph Replay["Replay — no LLM or provider key"]
+        Invocation["Typed invocation"]
+        Policy["Policy gate<br/>inputs, origins, routes, actions, risk"]
+        Engine["Replay engine<br/>fixed ordered steps"]
+        Resolver["Semantic target resolution<br/>primary strategy, then fallbacks"]
+        Execute["Surface action"]
+        Wait["Poll postconditions and<br/>runtime conditions"]
+        Checkpoint["Final success checkpoint"]
+
+        Invocation --> Policy --> Engine --> Resolver --> Execute --> Wait
+        Wait --> Engine
+        Wait --> Checkpoint
+    end
+
+    Review --> Policy
+    Execute <--> TargetApp
+
+    Success["Typed success output"]
+    Business["Typed business outcome<br/>for example MEMBER_NOT_FOUND"]
+    Intervention["Intervention required"]
+    Handoff["Human owns the same<br/>browser session temporarily"]
+    Resume["Verify resume condition<br/>and return ownership"]
+    Evidence[("Sanitized evidence")]
+
+    Checkpoint --> Success
+    Wait --> Business
+    Wait --> Intervention --> Handoff --> Resume --> Engine
+    Trace --> Evidence
+    Success --> Evidence
+    Business --> Evidence
+    Handoff --> Evidence
+```
+
+The upper path is the only place where a model participates. Its successful
+trace is compiled into a strict artifact. The lower path consumes that artifact
+as an executable contract: policy and step order are fixed, target resolution
+is semantic, and every terminal result produces sanitized evidence. Human
+handoff changes ownership without replacing the live browser session.
+
 The main boundary is `Surface`. Replay understands semantic operations such as
 navigate, resolve target, activate, read text, and read value; it does not know
 Playwright locators. `PlaywrightWebSurface` implements those operations for the
