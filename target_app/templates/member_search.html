@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Member Search{% endblock %}
+
+{% block content %}
+  <h1>Member Search</h1>
+
+  <form
+    name="member-search"
+    method="get"
+    action="/workspace/results"
+  >
+    <table>
+      <tr>
+        <td><label for="f_003">Member ID</label></td>
+        <td>
+          <input
+            id="f_003"
+            name="f_003"
+            type="text"
+            maxlength="5"
+            autocomplete="off"
+          >
+        </td>
+      </tr>
+    </table>
+
+    <div class="toolbar">
+      <a
+        href="#"
+        onclick="document.forms['member-search'].submit(); return false;"
+      >Search</a>
+    </div>
+  </form>
+{% endblock %}

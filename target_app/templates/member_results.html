@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Member Search Results{% endblock %}
+
+{% block content %}
+  <h1>Member Search Results</h1>
+
+  {% if member %}
+    <table name="member-results">
+      <caption>Member Search Results</caption>
+      <thead>
+        <tr>
+          <th>Member ID</th>
+          <th>Member name</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ member_id }}</td>
+          <td>{{ member.name }}</td>
+          <td>
+            <a href="/workspace/member/{{ member_id }}">View details</a>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  {% else %}
+    <p class="message error">No matching member</p>
+  {% endif %}
+
+  <p><a href="/workspace/search">Return to search</a></p>
+{% endblock %}

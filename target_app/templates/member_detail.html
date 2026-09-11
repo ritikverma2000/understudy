@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Member Details{% endblock %}
+
+{% block content %}
+  <h1>Member Details</h1>
+
+  <table name="member-details">
+    <caption>Member Details</caption>
+    <thead>
+      <tr>
+        <th>Field</th>
+        <th>Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th>Member ID</th>
+        <td>{{ member_id }}</td>
+      </tr>
+      <tr>
+        <th>Member name</th>
+        <td>{{ member.name }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Accounts</h2>
+  <table name="accounts">
+    <caption>Accounts</caption>
+    <thead>
+      <tr>
+        <th>Account type</th>
+        <th>Current balance</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for account in member.accounts %}
+        <tr class="{{ account.type | lower | replace(' ', '-') }}">
+          <td>{{ account.type }}</td>
+          <td class="balance">{{ account.balance_cents | usd }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p><a href="/workspace/search">Return to search</a></p>
+{% endblock %}
