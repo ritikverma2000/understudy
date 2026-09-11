@@ -9,6 +9,7 @@ from werkzeug.serving import BaseWSGIServer, make_server
 
 from target_app import create_app
 from understudy.artifact.models import CapabilityArtifact
+from understudy.replay import ReplayEngine
 from understudy.surface import PlaywrightWebSurface
 
 
@@ -180,4 +181,43 @@ def test_resolves_relational_table_targets(
     assert balance.strategy_id == "savings_balance_table_relation"
     assert balance.handle is not None
     assert balance.handle.inner_text() == "$1,250.50"
+    page.close()
+
+
+def test_replay_engine_completes_success_workflow(
+    artifact: CapabilityArtifact,
+    target_app_url: str,
+    browser: Browser,
+) -> None:
+    page = browser.new_page()
+    surface = PlaywrightWebSurface(page, artifact.surface_contexts)
+
+    result = ReplayEngine(artifact, surface).run(
+        inputs={"member_id": "00123"},
+        runtime={"base_url": target_app_url},
+    )
+
+    assert result.status == "success"
+    assert result.outputs == {
+        "savings_balance_cents": 125050,
+        "currency": "USD",
+    }
+    page.close()
+
+
+def test_replay_engine_returns_not_found_business_outcome(
+    artifact: CapabilityArtifact,
+    target_app_url: str,
+    browser: Browser,
+) -> None:
+    page = browser.new_page()
+    surface = PlaywrightWebSurface(page, artifact.surface_contexts)
+
+    result = ReplayEngine(artifact, surface).run(
+        inputs={"member_id": "99999"},
+        runtime={"base_url": target_app_url},
+    )
+
+    assert result.status == "business_outcome"
+    assert result.condition_code == "MEMBER_NOT_FOUND"
     page.close()

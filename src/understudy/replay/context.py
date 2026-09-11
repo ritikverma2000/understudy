@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
-import re
+
 
 _BINDING_PATTERN = re.compile(
     r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}"
@@ -35,7 +36,7 @@ class ReplayContext:
             "runtime": self.runtime,
             "outputs": self.outputs,
         }
-    
+
     def render(self, template: str) -> str:
         return _BINDING_PATTERN.sub(
             lambda match: str(self.lookup(match.group(1))),
