@@ -86,8 +86,15 @@ class PlaywrightWebSurface:
     def activate(self, target: ResolvedTarget) -> None:
         self._handle(target).click()
 
-    def press_key(self, target: ResolvedTarget, key: str) -> None:
-        self._handle(target).press(key)
+    def press_key(
+    self,
+    key: str,
+    target: ResolvedTarget | None = None,
+) -> None:
+        if target is None:
+            self._page.keyboard.press(key)
+        else:
+            self._handle(target).press(key)
 
     def read_text(self, target: ResolvedTarget) -> str:
         return self._handle(target).inner_text()
