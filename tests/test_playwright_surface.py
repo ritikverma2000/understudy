@@ -11,7 +11,8 @@ from werkzeug.serving import BaseWSGIServer, make_server
 from target_app import create_app
 from understudy.artifact.models import CapabilityArtifact
 from understudy.handoff import InteractiveBrowserHandoff
-from understudy.replay import ReplayEngine
+from understudy.replay import InterventionRequired, ReplayEngine
+from understudy.replay.context import ReplayContext
 from understudy.surface import PlaywrightWebSurface
 
 
@@ -228,20 +229,21 @@ def test_replay_engine_returns_not_found_business_outcome(
     page.close()
 
 
-def test_handoff_keeps_same_live_browser_session(
+def test_runtime_intervention_handoff_resumes_same_replay_session(
+    artifact: CapabilityArtifact,
     target_app_url: str,
     browser: Browser,
     tmp_path: Path,
 ) -> None:
     page = browser.new_page()
     original_page = page
-    page.goto(f"{target_app_url}/app?inject=expired")
-    workspace = page.frame_locator("iframe[name='memberWorkspace']")
-    expired = workspace.get_by_text(
-        "Your session has expired",
-        exact=True,
+    changed = artifact.model_copy(deep=True)
+    changed.target.routes["app_shell"].pattern = (
+        f"{target_app_url}/app?inject=expired"
     )
-    expired.wait_for()
+    surface = PlaywrightWebSurface(page, changed.surface_contexts)
+    workspace = page.frame_locator("iframe[name='memberWorkspace']")
+    evidence_path: Path | None = None
 
     def human_operator(prompt: str) -> str:
         workspace.get_by_role(
@@ -251,26 +253,42 @@ def test_handoff_keeps_same_live_browser_session(
         ).click()
         return ""
 
-    handoff = InteractiveBrowserHandoff(
-        input_fn=human_operator,
-        output_fn=lambda message: None,
-    )
-    evidence_path = handoff.handle(
-        page=page,
-        capability_id="lookup_member_savings",
-        goal="Restore an expired synthetic session",
-        current_step="navigate_to_member_search",
-        reason="Human reauthentication is required.",
-        resume_check=lambda: not expired.is_visible(),
-        evidence_dir=tmp_path,
+    def handle_intervention(
+        intervention: InterventionRequired,
+        context: ReplayContext,
+    ) -> None:
+        nonlocal evidence_path
+        expired = workspace.get_by_text(
+            "Your session has expired",
+            exact=True,
+        )
+        handoff = InteractiveBrowserHandoff(
+            input_fn=human_operator,
+            output_fn=lambda message: None,
+        )
+        evidence_path = handoff.handle(
+            page=page,
+            capability_id=intervention.capability_id or "unknown",
+            goal=intervention.goal or "unknown",
+            current_step=intervention.current_step or "unknown",
+            reason=intervention.reason,
+            resume_check=lambda: not expired.is_visible(),
+            evidence_dir=tmp_path,
+        )
+
+    result = ReplayEngine(
+        changed,
+        surface,
+        intervention_handler=handle_intervention,
+    ).run(
+        inputs={"member_id": "00123"},
+        runtime={"base_url": target_app_url},
     )
 
     assert page is original_page
-    workspace.get_by_role(
-        "heading",
-        name="Member Search",
-        exact=True,
-    ).wait_for()
+    assert result.status == "success"
+    assert result.completed_steps == tuple(step.id for step in artifact.steps)
+    assert evidence_path is not None
     evidence = json.loads(evidence_path.read_text())
     assert evidence["owner"] == "automation"
     assert [event["to_owner"] for event in evidence["transfers"]] == [

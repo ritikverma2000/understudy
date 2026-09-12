@@ -8,8 +8,8 @@ README. A complete submission should retain:
   `capabilities/`;
 - `discovery-*-final.png` — the discovery completion state;
 - `replay-*.json` — deterministic success and not-found replay records; and
-- `handoff-run.json` plus its before/after screenshots — the ownership
-  transfer demonstration.
+- `handoff-run.json` plus its before/after screenshots — runtime-condition
+  detection, ownership transfer, and deterministic replay after resume.
 
 Generated evidence must come from the CLI. Unit-test fake-model output is not
 accepted here as a substitute for the required live discovery run. Runtime

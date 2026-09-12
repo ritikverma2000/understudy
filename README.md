@@ -36,6 +36,8 @@ customer data, tokens, or PII into the sample application.
   `capabilities/`; the two files have different jobs and both are retained.
 
 See [REPORT.md](REPORT.md) for design decisions and trade-offs.
+For a class-by-class schema walkthrough and interview preparation, see
+[docs/INTERVIEW_NOTES.md](docs/INTERVIEW_NOTES.md).
 
 ## Setup
 
@@ -83,7 +85,11 @@ Start the synthetic application in terminal 1:
 ```bash
 cd understudy
 conda activate understudy
-python -m target_app.app
+python -m flask \
+  --app target_app.app:app \
+  run \
+  --host 127.0.0.1 \
+  --port 5055
 ```
 
 In terminal 2, perform the required genuine LLM-driven discovery run:
@@ -95,7 +101,7 @@ understudy discover \
   --provider openrouter \
   --model nex-agi/nex-n2.5-pro:free \
   --goal 'Look up member 00123 and read the current Savings balance' \
-  --target http://127.0.0.1:5000/app \
+  --target http://127.0.0.1:5055/app \
   --template tests/fixtures/lookup_member_savings.hand-authored.json \
   --input member_id=00123 \
   --output capabilities/lookup_member_savings.generated.json \
@@ -119,7 +125,7 @@ unset OPENROUTER_API_KEY
 understudy replay \
   capabilities/lookup_member_savings.generated.json \
   --input member_id=00123 \
-  --runtime base_url=http://127.0.0.1:5000 \
+  --runtime base_url=http://127.0.0.1:5055 \
   --evidence-dir evidence
 ```
 
@@ -133,7 +139,7 @@ Exercise a legitimate business outcome rather than a crash:
 understudy replay \
   capabilities/lookup_member_savings.generated.json \
   --input member_id=99999 \
-  --runtime base_url=http://127.0.0.1:5000 \
+  --runtime base_url=http://127.0.0.1:5055 \
   --evidence-dir evidence
 ```
 
@@ -145,15 +151,21 @@ The result has `status: business_outcome` and
 With the Flask app still running, start the interactive headed demo:
 
 ```bash
-understudy handoff-demo --evidence-dir evidence
+understudy handoff-demo \
+  --artifact capabilities/lookup_member_savings.generated.json \
+  --target 'http://127.0.0.1:5055/app?inject=expired' \
+  --evidence-dir evidence
 ```
 
-Understudy opens an injected expired-session state, pauses automation, records
-the owner as `human`, and leaves the same browser page open. Click **Resume
-session** in that browser, return to the terminal, and press Enter. Understudy
-verifies the resume condition, transfers ownership back to `automation`, and
-writes before/after screenshots plus `evidence/handoff-run.json`. Click/input
-events are recorded, but input values are never captured.
+The artifact's runtime monitor detects the injected `SESSION_EXPIRED` state
+inside a real replay and invokes the handoff handler. Understudy pauses that
+engine, records the owner as `human`, and leaves the same browser page open.
+Click **Resume session** in that browser, return to the terminal, and press
+Enter. Understudy verifies the artifact's resume condition, transfers ownership
+back to `automation`, and continues the same replay through its final
+checkpoint. `evidence/handoff-run.json` contains the transfer ledger, sanitized
+resumed result, and before/after screenshot paths. Click/input events are
+recorded, but input values are never captured.
 
 ## Tests
 

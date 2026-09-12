@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from understudy.artifact.models import (
     AccessibilityStrategy,
@@ -86,6 +87,7 @@ class DiscoveryRunner:
         history: list[TraceEvent] = []
         outputs: dict[str, object] = {}
         sensitive_read_values: set[str] = set()
+        self._validate_request(goal, target_url, inputs)
         self._surface.navigate(target_url)
 
         for index, (expected_action, expected_target) in enumerate(
@@ -301,6 +303,77 @@ class DiscoveryRunner:
             artifact.model_dump(mode="json")
         )
 
+    def _validate_request(
+        self,
+        goal: str,
+        target_url: str,
+        inputs: dict[str, str],
+    ) -> None:
+        if not goal.strip():
+            raise DiscoveryError("discovery goal cannot be empty")
+
+        unknown_inputs = set(inputs) - set(self._template.inputs)
+        if unknown_inputs:
+            raise DiscoveryError(
+                f"unknown discovery inputs: {sorted(unknown_inputs)}"
+            )
+
+        for name, definition in self._template.inputs.items():
+            if definition.required and name not in inputs:
+                raise DiscoveryError(
+                    f"missing discovery input {name!r}"
+                )
+            if name in inputs and re.fullmatch(
+                definition.pattern,
+                inputs[name],
+            ) is None:
+                raise DiscoveryError(
+                    f"discovery input {name!r} does not match its pattern"
+                )
+
+        policy = self._template.policy_requirements
+        entry_route_ref = self._template.target.entry_point.route_ref
+        if entry_route_ref not in policy.allowed_route_refs:
+            raise DiscoveryError("entry route is outside the policy allowlist")
+
+        required_actions = {
+            "navigate",
+            *(
+                "enter_text" if action == "type_text" else action
+                for action, _ in self.expected_flow
+                if action != "finish"
+            ),
+        }
+        disallowed_actions = required_actions - set(
+            policy.allowed_action_types
+        )
+        if disallowed_actions:
+            raise DiscoveryError(
+                "discovery requires disallowed actions: "
+                f"{sorted(disallowed_actions)}"
+            )
+
+        origin = self._origin(target_url)
+        runtime = {
+            name: origin
+            for name in self._template.target.runtime_bindings
+        }
+        context = ReplayContext(inputs=inputs, runtime=runtime)
+        allowed_origins = {
+            self._origin(context.render(allowed))
+            for allowed in policy.allowed_origins
+        }
+        if origin not in allowed_origins:
+            raise DiscoveryError("target is outside allowed origins")
+
+        expected_entry = context.render(
+            self._template.target.routes[entry_route_ref].pattern
+        )
+        if target_url != expected_entry:
+            raise DiscoveryError(
+                "target does not match the reviewed entry-point route"
+            )
+
     @staticmethod
     def _redact_goal(goal: str, inputs: dict[str, str]) -> str:
         redacted = goal
@@ -310,5 +383,12 @@ class DiscoveryRunner:
 
     @staticmethod
     def _origin(url: str) -> str:
-        match = re.match(r"^(https?://[^/]+)", url)
-        return match.group(1) if match else "[INVALID TARGET]"
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise DiscoveryError("target must be an HTTP(S) URL without credentials")
+        return f"{parsed.scheme}://{parsed.netloc}"

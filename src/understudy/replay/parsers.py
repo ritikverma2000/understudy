@@ -42,7 +42,9 @@ def parse_money(
     match = _USD_PATTERN.fullmatch(text)
 
     if match is None:
-        raise MoneyParseError(f"invalid en-US money value {text!r}")
+        # The source text is financial data. Keep it out of exceptions because
+        # exception messages may be printed or persisted as failure evidence.
+        raise MoneyParseError("invalid en-US money value")
 
     whole = int(match.group("whole").replace(",", ""))
     fraction = int(match.group("fraction"))

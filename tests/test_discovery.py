@@ -2,8 +2,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from understudy.artifact.models import CapabilityArtifact
-from understudy.discovery.engine import DiscoveryRunner
+from understudy.discovery.engine import DiscoveryError, DiscoveryRunner
 from understudy.discovery.models import (
     ActivateDecision,
     ControlSnapshot,
@@ -175,3 +177,49 @@ def test_discovery_emits_valid_artifact_and_sanitized_evidence(
     assert "{{inputs.member_id}}" in serialized_evidence
     assert (evidence_dir / artifact_path.name).exists()
     assert surface.actions[1] == ("type_text", "c1", "00123")
+
+
+@pytest.mark.parametrize(
+    ("target_url", "inputs", "message"),
+    [
+        (
+            "http://example.test/admin",
+            {"member_id": "00123"},
+            "entry-point route",
+        ),
+        (
+            "http://example.test/app",
+            {"member_id": "abcde"},
+            "does not match",
+        ),
+        (
+            "http://example.test/app",
+            {"member_id": "00123", "secret": "value"},
+            "unknown discovery inputs",
+        ),
+    ],
+)
+def test_discovery_rejects_requests_outside_reviewed_contract(
+    tmp_path: Path,
+    target_url: str,
+    inputs: dict[str, str],
+    message: str,
+) -> None:
+    template = CapabilityArtifact.model_validate_json(FIXTURE_PATH.read_text())
+    surface = FakeDiscoverySurface()
+    runner = DiscoveryRunner(
+        model=FakeModel(),  # type: ignore[arg-type]
+        surface=surface,  # type: ignore[arg-type]
+        template=template,
+    )
+
+    with pytest.raises(DiscoveryError, match=message):
+        runner.run(
+            goal="Look up a member",
+            target_url=target_url,
+            inputs=inputs,
+            artifact_path=tmp_path / "generated.json",
+            evidence_dir=tmp_path / "evidence",
+        )
+
+    assert surface.actions == []

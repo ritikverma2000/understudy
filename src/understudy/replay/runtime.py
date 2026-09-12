@@ -27,9 +27,20 @@ class BusinessOutcomeReached(RuntimeError):
 
 
 class InterventionRequired(RuntimeError):
-    def __init__(self, code: str, reason: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        reason: str,
+        *,
+        capability_id: str | None = None,
+        goal: str | None = None,
+        current_step: str | None = None,
+    ) -> None:
         self.code = code
         self.reason = reason
+        self.capability_id = capability_id
+        self.goal = goal
+        self.current_step = current_step
         super().__init__(f"{code}: {reason}")
 
 

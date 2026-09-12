@@ -123,3 +123,81 @@ def test_undeclared_parser_output_is_rejected(
         match="writes undeclared outputs",
     ):
         CapabilityArtifact.model_validate(artifact_data)
+
+
+def test_unknown_action_value_reference_is_rejected(
+    artifact_data: dict,
+) -> None:
+    artifact_data["steps"][1]["action"]["value_from"] = (
+        "inputs.missing_member"
+    )
+
+    with pytest.raises(ValidationError, match="references unknown value"):
+        CapabilityArtifact.model_validate(artifact_data)
+
+
+def test_unknown_locator_value_reference_is_rejected(
+    artifact_data: dict,
+) -> None:
+    relation = artifact_data["targets"]["member_result_link"][
+        "strategies"
+    ][0]
+    relation["row_match"]["equals_from"] = "inputs.missing_member"
+
+    with pytest.raises(ValidationError, match="references unknown value"):
+        CapabilityArtifact.model_validate(artifact_data)
+
+
+def test_unknown_condition_output_is_rejected(
+    artifact_data: dict,
+) -> None:
+    artifact_data["success_checkpoint"]["condition"]["conditions"][2][
+        "output"
+    ] = "missing_output"
+
+    with pytest.raises(ValidationError, match="references unknown output"):
+        CapabilityArtifact.model_validate(artifact_data)
+
+
+def test_unknown_route_template_reference_is_rejected(
+    artifact_data: dict,
+) -> None:
+    artifact_data["target"]["routes"]["app_shell"]["pattern"] = (
+        "{{runtime.missing_origin}}/app"
+    )
+
+    with pytest.raises(ValidationError, match="references unknown value"):
+        CapabilityArtifact.model_validate(artifact_data)
+
+
+def test_actionable_target_cannot_treat_absence_as_success(
+    artifact_data: dict,
+) -> None:
+    artifact_data["targets"]["member_id_input"]["drift_policy"][
+        "no_resolution"
+    ] = "condition_not_present"
+
+    with pytest.raises(ValidationError, match="only detection targets"):
+        CapabilityArtifact.model_validate(artifact_data)
+
+
+def test_money_parser_output_types_are_checked(
+    artifact_data: dict,
+) -> None:
+    parser = artifact_data["steps"][4]["action"]["parser"]
+    parser["amount_output"] = "currency"
+    parser["currency_output"] = "savings_balance_cents"
+
+    with pytest.raises(ValidationError, match="money parser requires"):
+        CapabilityArtifact.model_validate(artifact_data)
+
+
+def test_sensitive_output_cannot_allow_raw_logging(
+    artifact_data: dict,
+) -> None:
+    artifact_data["outputs"]["savings_balance_cents"]["log_policy"] = (
+        "allow"
+    )
+
+    with pytest.raises(ValidationError, match="sensitive outputs"):
+        CapabilityArtifact.model_validate(artifact_data)

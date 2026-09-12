@@ -4,7 +4,12 @@ from typing import Any
 import pytest
 
 from understudy.artifact.models import CapabilityArtifact, Target
-from understudy.replay import ReplayEngine, ReplayPolicyError, StepExecutionError
+from understudy.replay import (
+    InterventionRequired,
+    ReplayEngine,
+    ReplayPolicyError,
+    StepExecutionError,
+)
 from understudy.surface import ResolvedTarget
 
 
@@ -103,6 +108,33 @@ class FlakyMoneySurface(WorkflowSurface):
         return super().read_text(target)
 
 
+class ExpiringSurface(WorkflowSurface):
+    def __init__(self) -> None:
+        super().__init__()
+        self.expired = True
+
+    def resolve_target(
+        self,
+        target_ref: str,
+        target: Target,
+        values: dict[str, Any],
+    ) -> ResolvedTarget:
+        if target_ref == "session_expired_message" and self.expired:
+            return ResolvedTarget(
+                target_ref=target_ref,
+                status="primary",
+                strategy_id=target.drift_policy.primary_strategy_id,
+                match_count=1,
+                handle=target_ref,
+            )
+        return super().resolve_target(target_ref, target, values)
+
+    def is_visible(self, target: ResolvedTarget) -> bool:
+        if target.target_ref == "session_expired_message":
+            return self.expired
+        return super().is_visible(target)
+
+
 @pytest.fixture(scope="module")
 def artifact() -> CapabilityArtifact:
     return CapabilityArtifact.model_validate_json(FIXTURE_PATH.read_text())
@@ -136,6 +168,64 @@ def test_not_found_is_a_business_outcome(
     assert result.condition_code == "MEMBER_NOT_FOUND"
     assert result.outputs == {}
     assert result.completed_steps[-1] == "activate_member_search"
+
+
+def test_intervention_handler_resumes_the_same_replay(
+    artifact: CapabilityArtifact,
+) -> None:
+    surface = ExpiringSurface()
+    interventions: list[InterventionRequired] = []
+
+    def handle(
+        intervention: InterventionRequired,
+        context: Any,
+    ) -> None:
+        interventions.append(intervention)
+        surface.expired = False
+
+    result = ReplayEngine(
+        artifact,
+        surface,
+        intervention_handler=handle,
+    ).run(
+        inputs={"member_id": "00123"},
+        runtime={"base_url": "http://example.test"},
+    )
+
+    assert result.status == "success"
+    assert len(interventions) == 1
+    assert interventions[0].code == "SESSION_EXPIRED"
+    assert interventions[0].capability_id == "lookup_member_savings"
+    assert interventions[0].current_step == "navigate_to_member_search"
+
+
+def test_unhandled_intervention_contains_routing_context(
+    artifact: CapabilityArtifact,
+) -> None:
+    with pytest.raises(InterventionRequired) as captured:
+        ReplayEngine(artifact, ExpiringSurface()).run(
+            inputs={"member_id": "00123"},
+            runtime={"base_url": "http://example.test"},
+        )
+
+    assert captured.value.capability_id == "lookup_member_savings"
+    assert captured.value.goal == artifact.capability.description
+    assert captured.value.current_step == "navigate_to_member_search"
+
+
+def test_success_rejects_missing_required_output(
+    artifact: CapabilityArtifact,
+) -> None:
+    changed = artifact.model_copy(deep=True)
+    changed.outputs["unproduced"] = changed.outputs[
+        "savings_balance_cents"
+    ].model_copy()
+
+    with pytest.raises(ReplayPolicyError, match="required output 'unproduced'"):
+        ReplayEngine(changed, WorkflowSurface()).run(
+            inputs={"member_id": "00123"},
+            runtime={"base_url": "http://example.test"},
+        )
 
 
 def test_retryable_parse_failure_repeats_read_action(
@@ -175,6 +265,25 @@ def test_missing_runtime_binding_is_rejected(
         ReplayEngine(artifact, WorkflowSurface()).run(
             inputs={"member_id": "00123"},
             runtime={},
+        )
+
+
+def test_unknown_invocation_values_are_rejected(
+    artifact: CapabilityArtifact,
+) -> None:
+    with pytest.raises(ReplayPolicyError, match="unknown inputs"):
+        ReplayEngine(artifact, WorkflowSurface()).run(
+            inputs={"member_id": "00123", "secret": "value"},
+            runtime={"base_url": "http://example.test"},
+        )
+
+    with pytest.raises(ReplayPolicyError, match="unknown runtime bindings"):
+        ReplayEngine(artifact, WorkflowSurface()).run(
+            inputs={"member_id": "00123"},
+            runtime={
+                "base_url": "http://example.test",
+                "redirect": "https://evil.example",
+            },
         )
 
 

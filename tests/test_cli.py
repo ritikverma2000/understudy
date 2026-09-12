@@ -272,6 +272,8 @@ def test_handoff_demo_reports_returned_control(
     exit_code = cli.main(
         [
             "handoff-demo",
+            "--artifact",
+            str(FIXTURE_PATH),
             "--target",
             "http://127.0.0.1:5000/app?inject=expired",
             "--evidence-dir",

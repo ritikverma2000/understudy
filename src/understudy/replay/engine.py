@@ -14,6 +14,7 @@ from understudy.replay.context import ReplayContext
 from understudy.replay.parsers import MoneyParseError
 from understudy.replay.runtime import (
     BusinessOutcomeReached,
+    InterventionRequired,
     RuntimeConditionMonitor,
 )
 from understudy.replay.waiting import ConditionTimeoutError, ConditionWaiter
@@ -21,6 +22,7 @@ from understudy.surface import Surface, TargetResolutionError
 
 
 ReplayStatus = Literal["success", "business_outcome"]
+InterventionHandler = Callable[[InterventionRequired, ReplayContext], None]
 
 
 @dataclass(frozen=True)
@@ -62,11 +64,13 @@ class ReplayEngine:
         poll_interval_ms: int = 50,
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        intervention_handler: InterventionHandler | None = None,
     ) -> None:
         self._artifact = artifact
         self._surface = surface
         self._monotonic = monotonic
         self._sleep = sleep
+        self._intervention_handler = intervention_handler
         self._evaluator = ConditionEvaluator(surface, artifact.targets)
         self._waiter = ConditionWaiter(
             self._evaluator,
@@ -101,7 +105,7 @@ class ReplayEngine:
                 self._enforce_runtime_budget(started_at)
                 self._run_step(step, context, started_at)
                 completed.append(step.id)
-                self._runtime.check("after_step", context)
+                self._check_runtime("after_step", context, step.id)
 
             checkpoint_timeout = self._remaining_runtime_ms(started_at)
             if checkpoint_timeout <= 0:
@@ -111,11 +115,13 @@ class ReplayEngine:
                 self._artifact.success_checkpoint.condition,
                 context,
                 timeout_ms=checkpoint_timeout,
-                during_wait=lambda: self._runtime.check(
+                during_wait=lambda: self._check_runtime(
                     "during_wait",
                     context,
+                    "success_checkpoint",
                 ),
             )
+            self._validate_outputs(context.outputs)
         except BusinessOutcomeReached as outcome:
             return ReplayResult(
                 status="business_outcome",
@@ -131,15 +137,40 @@ class ReplayEngine:
             completed_steps=tuple(completed),
         )
 
+    def _validate_outputs(self, outputs: dict[str, Any]) -> None:
+        for name, definition in self._artifact.outputs.items():
+            if definition.required and name not in outputs:
+                raise ReplayPolicyError(
+                    f"required output {name!r} was not produced"
+                )
+            if name not in outputs:
+                continue
+
+            value = outputs[name]
+            if definition.type == "integer":
+                type_matches = type(value) is int
+            else:
+                type_matches = isinstance(value, str)
+            if not type_matches:
+                raise ReplayPolicyError(
+                    f"output {name!r} does not match declared type "
+                    f"{definition.type!r}"
+                )
+            if definition.enum is not None and value not in definition.enum:
+                raise ReplayPolicyError(
+                    f"output {name!r} is outside its declared enum"
+                )
+
     def _run_step(
         self,
         step: Step,
         context: ReplayContext,
         started_at: float,
     ) -> None:
-        during_wait = lambda: self._runtime.check(
+        during_wait = lambda: self._check_runtime(
             "during_wait",
             context,
+            step.id,
         )
         self._waiter.wait_until(
             step.precondition,
@@ -189,6 +220,26 @@ class ReplayEngine:
             last_error,
         ) from last_error
 
+    def _check_runtime(
+        self,
+        phase: Literal["during_wait", "after_step"],
+        context: ReplayContext,
+        current_step: str,
+    ) -> None:
+        try:
+            self._runtime.check(phase, context)
+        except InterventionRequired as condition:
+            intervention = InterventionRequired(
+                condition.code,
+                condition.reason,
+                capability_id=self._artifact.capability.id,
+                goal=self._artifact.capability.description,
+                current_step=current_step,
+            )
+            if self._intervention_handler is None:
+                raise intervention from condition
+            self._intervention_handler(intervention, context)
+
     @staticmethod
     def _retry_allowed(error: Exception, retry_on: list[str]) -> bool:
         if isinstance(error, ConditionTimeoutError):
@@ -224,6 +275,20 @@ class ReplayEngine:
 
         if len(artifact.steps) > policy.maximum_steps:
             raise ReplayPolicyError("artifact exceeds maximum_steps")
+
+        unknown_inputs = set(inputs) - set(artifact.inputs)
+        if unknown_inputs:
+            raise ReplayPolicyError(
+                f"unknown inputs: {sorted(unknown_inputs)}"
+            )
+
+        unknown_runtime = set(runtime) - set(
+            artifact.target.runtime_bindings
+        )
+        if unknown_runtime:
+            raise ReplayPolicyError(
+                f"unknown runtime bindings: {sorted(unknown_runtime)}"
+            )
 
         for name, definition in artifact.inputs.items():
             if definition.required and name not in inputs:

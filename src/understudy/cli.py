@@ -5,10 +5,14 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Sequence
+from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
 
-from understudy.artifact.models import CapabilityArtifact
+from understudy.artifact.models import (
+    CapabilityArtifact,
+    InterventionRuntimeCondition,
+)
 from understudy.discovery import (
     DiscoveryResult,
     DiscoveryRunner,
@@ -21,7 +25,9 @@ from understudy.evidence import (
     write_replay_evidence,
 )
 from understudy.handoff import InteractiveBrowserHandoff
-from understudy.replay import ReplayEngine, ReplayResult
+from understudy.replay import InterventionRequired, ReplayEngine, ReplayResult
+from understudy.replay.conditions import ConditionEvaluator
+from understudy.replay.context import ReplayContext
 from understudy.surface import PlaywrightWebSurface
 
 
@@ -134,31 +140,93 @@ def execute_discovery(
 
 def execute_handoff_demo(
     *,
+    artifact: CapabilityArtifact,
     target_url: str,
     evidence_dir: Path,
 ) -> Path:
+    demo_artifact = artifact.model_copy(deep=True)
+    entry_route_ref = demo_artifact.target.entry_point.route_ref
+    demo_artifact.target.routes[entry_route_ref].pattern = target_url
+    parsed_target = urlsplit(target_url)
+    base_url = f"{parsed_target.scheme}://{parsed_target.netloc}"
+
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=False)
 
         try:
             page = browser.new_page()
-            page.goto(target_url)
-            workspace = page.frame_locator("iframe[name='memberWorkspace']")
-            expired = workspace.get_by_text(
-                "Your session has expired",
-                exact=True,
+            surface = PlaywrightWebSurface(
+                page,
+                demo_artifact.surface_contexts,
             )
-            expired.wait_for()
+            evaluator = ConditionEvaluator(
+                surface,
+                demo_artifact.targets,
+            )
             handoff = InteractiveBrowserHandoff()
-            return handoff.handle(
-                page=page,
-                capability_id="lookup_member_savings",
-                goal="Restore an expired synthetic member-servicing session",
-                current_step="navigate_to_member_search",
-                reason="The session requires human reauthentication.",
-                resume_check=lambda: not expired.is_visible(),
-                evidence_dir=evidence_dir,
+            evidence_path: Path | None = None
+
+            def handle_intervention(
+                intervention: InterventionRequired,
+                context: ReplayContext,
+            ) -> None:
+                nonlocal evidence_path
+                condition = next(
+                    item
+                    for item in demo_artifact.runtime_conditions
+                    if item.code == intervention.code
+                )
+                if not isinstance(
+                    condition,
+                    InterventionRuntimeCondition,
+                ):
+                    raise RuntimeError(
+                        f"{intervention.code!r} is not an intervention"
+                    )
+                evidence_path = handoff.handle(
+                    page=page,
+                    capability_id=intervention.capability_id
+                    or demo_artifact.capability.id,
+                    goal=intervention.goal
+                    or demo_artifact.capability.description,
+                    current_step=intervention.current_step or "unknown",
+                    reason=intervention.reason,
+                    resume_check=lambda: evaluator.evaluate(
+                        condition.intervention.resume_condition,
+                        context,
+                    ),
+                    evidence_dir=evidence_dir,
+                )
+
+            result = ReplayEngine(
+                demo_artifact,
+                surface,
+                intervention_handler=handle_intervention,
+            ).run(
+                inputs={"member_id": "00123"},
+                runtime={"base_url": base_url},
             )
+
+            if evidence_path is None:
+                raise RuntimeError(
+                    "handoff demo completed without an intervention"
+                )
+
+            evidence = json.loads(evidence_path.read_text())
+            evidence["resumed_replay"] = {
+                "status": result.status,
+                "completed_steps": list(result.completed_steps),
+                "outputs": {
+                    name: (
+                        value
+                        if demo_artifact.outputs[name].log_policy == "allow"
+                        else "[REDACTED]"
+                    )
+                    for name, value in result.outputs.items()
+                },
+            }
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
+            return evidence_path
         finally:
             browser.close()
 
@@ -167,7 +235,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="understudy",
         description=(
-            "Validate and deterministically replay Understudy capabilities."
+            "Discover, validate, replay, and hand off Understudy capabilities."
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -277,6 +345,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="demonstrate same-session human control transfer",
     )
     handoff.add_argument(
+        "--artifact",
+        type=Path,
+        default=Path("capabilities/lookup_member_savings.generated.json"),
+        help="capability used to detect the intervention and resume replay",
+    )
+    handoff.add_argument(
         "--target",
         default="http://127.0.0.1:5000/app?inject=expired",
         help="expired-session demo URL",
@@ -342,6 +416,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "handoff-demo":
             evidence_path = execute_handoff_demo(
+                artifact=load_artifact(args.artifact),
                 target_url=args.target,
                 evidence_dir=args.evidence_dir,
             )
@@ -391,6 +466,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "code",
             "category",
             "reason",
+            "capability_id",
+            "goal",
+            "current_step",
         ):
             value = getattr(error, field, None)
             if value is not None:

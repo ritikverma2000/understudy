@@ -42,12 +42,15 @@ def test_parse_en_us_money(
     ],
 )
 def test_rejects_malformed_money(text: str) -> None:
-    with pytest.raises(MoneyParseError):
+    with pytest.raises(MoneyParseError) as captured:
         parse_money(
             text,
             locale="en-US",
             expected_currency="USD",
         )
+
+    if text:
+        assert text not in str(captured.value)
 
 
 def test_rejects_unsupported_locale() -> None:

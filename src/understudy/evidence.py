@@ -94,7 +94,12 @@ def write_failure_evidence(
         "capability_id": artifact.capability.id,
         "status": "error",
         "error_type": type(error).__name__,
-        "message": str(error),
+        "message": _safe_failure_message(error),
+        "step_id": getattr(error, "step_id", None),
+        "attempts": getattr(error, "attempts", None),
+        "cause_type": getattr(error, "cause_type", None),
+        "condition_code": getattr(error, "code", None),
+        "category": getattr(error, "category", None),
         "screenshot": str(screenshot) if screenshot else None,
         "runtime_inputs_persisted": False,
         "dom_snapshot_persisted": False,
@@ -102,3 +107,22 @@ def write_failure_evidence(
     }
     path.write_text(json.dumps(payload, indent=2) + "\n")
     return path
+
+
+def _safe_failure_message(error: Exception) -> str:
+    """Describe a failure without serializing an arbitrary exception value."""
+    step_id = getattr(error, "step_id", None)
+    attempts = getattr(error, "attempts", None)
+    cause_type = getattr(error, "cause_type", None)
+    if step_id is not None:
+        return (
+            f"Step {step_id!r} failed after {attempts} attempt(s); "
+            f"cause={cause_type or 'unknown'}"
+        )
+
+    code = getattr(error, "code", None)
+    category = getattr(error, "category", None)
+    if code is not None:
+        return f"Runtime condition {code!r} stopped replay ({category or 'review'})"
+
+    return "Raw exception text withheld by evidence policy"

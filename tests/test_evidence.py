@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from understudy.artifact.models import CapabilityArtifact
-from understudy.evidence import write_replay_evidence
+from understudy.evidence import write_failure_evidence, write_replay_evidence
 from understudy.replay import ReplayResult
 
 
@@ -34,3 +34,26 @@ def test_replay_evidence_redacts_sensitive_values(tmp_path: Path) -> None:
     assert evidence["runtime_inputs_persisted"] is False
     assert evidence["model_in_decision_loop"] is False
     assert evidence["completed_steps"][0]["action_type"] == "navigate"
+
+
+def test_failure_evidence_withholds_arbitrary_exception_text(
+    tmp_path: Path,
+) -> None:
+    artifact = CapabilityArtifact.model_validate_json(FIXTURE_PATH.read_text())
+    screenshot = tmp_path / "failure.png"
+    screenshot.write_bytes(b"synthetic screenshot")
+
+    path = write_failure_evidence(
+        artifact=artifact,
+        error=RuntimeError("failed while reading $1,250.50"),
+        evidence_dir=tmp_path,
+        screenshot=screenshot,
+    )
+    serialized = path.read_text()
+    evidence = json.loads(serialized)
+
+    assert "$1,250.50" not in serialized
+    assert evidence["message"] == (
+        "Raw exception text withheld by evidence policy"
+    )
+    assert evidence["screenshot"] == str(screenshot)

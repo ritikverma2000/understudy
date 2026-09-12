@@ -1,20 +1,20 @@
 {
-  "session_id": "handoff-8b9a310d639b",
+  "session_id": "handoff-32ba410f4e0b",
   "capability_id": "lookup_member_savings",
-  "goal": "Restore an expired synthetic member-servicing session",
+  "goal": "Find a member through the user interface and return their current savings balance.",
   "current_step": "navigate_to_member_search",
-  "reason": "The session requires human reauthentication.",
+  "reason": "The session requires human reauthentication. Credentials and MFA are outside automation policy.",
   "owner": "automation",
   "transfers": [
     {
-      "at": "2026-09-11T20:59:00.089201+00:00",
+      "at": "2026-09-12T03:55:30.801302+00:00",
       "from_owner": "automation",
       "to_owner": "human",
       "actor": "system",
-      "reason": "The session requires human reauthentication."
+      "reason": "The session requires human reauthentication. Credentials and MFA are outside automation policy."
     },
     {
-      "at": "2026-09-11T20:59:39.653439+00:00",
+      "at": "2026-09-12T03:55:39.964552+00:00",
       "from_owner": "human",
       "to_owner": "automation",
       "actor": "local-operator",
@@ -28,7 +28,21 @@
       "name": "Resume session"
     }
   ],
-  "before_screenshot": "evidence/handoff-8b9a310d639b-before.png",
-  "after_screenshot": "evidence/handoff-8b9a310d639b-after.png",
-  "sensitive_input_values_recorded": false
+  "before_screenshot": "evidence/handoff-32ba410f4e0b-before.png",
+  "after_screenshot": "evidence/handoff-32ba410f4e0b-after.png",
+  "sensitive_input_values_recorded": false,
+  "resumed_replay": {
+    "status": "success",
+    "completed_steps": [
+      "navigate_to_member_search",
+      "enter_member_id",
+      "activate_member_search",
+      "open_matching_member",
+      "read_savings_balance"
+    ],
+    "outputs": {
+      "savings_balance_cents": "[REDACTED]",
+      "currency": "USD"
+    }
+  }
 }

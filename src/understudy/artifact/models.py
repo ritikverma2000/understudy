@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Annotated, Literal, Union
 
 from pydantic import (
@@ -12,6 +13,11 @@ from pydantic import (
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+_TEMPLATE_REFERENCE = re.compile(
+    r"\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}"
+)
 
 
 class MatchCount(StrictModel):
@@ -165,6 +171,24 @@ class Target(StrictModel):
     strategies: list[LocatorStrategy] = Field(min_length=1)
     drift_policy: DriftPolicy
     rationale: str | None = None
+
+    @model_validator(mode="after")
+    def validate_resolution_semantics(self) -> "Target":
+        if (
+            self.drift_policy.no_resolution == "condition_not_present"
+            and self.role_in_flow != "detectable"
+        ):
+            raise ValueError(
+                "only detection targets may treat no resolution as absence"
+            )
+        if (
+            self.drift_policy.no_resolution == "condition_not_present"
+            and self.expected_matches.min != 0
+        ):
+            raise ValueError(
+                "an absence-tolerant target must allow zero matches"
+            )
+        return self
 
 FrameLocatorStrategy = Annotated[
     Union[
@@ -379,6 +403,12 @@ class InputDefinition(StrictModel):
     sensitivity: Sensitivity
     log_policy: LogPolicy
 
+    @model_validator(mode="after")
+    def require_sensitive_redaction(self) -> "InputDefinition":
+        if self.sensitivity != "public" and self.log_policy != "redact":
+            raise ValueError("sensitive inputs must use redacted logging")
+        return self
+
 
 class OutputDefinition(StrictModel):
     type: Literal["integer", "string"]
@@ -388,6 +418,14 @@ class OutputDefinition(StrictModel):
     sensitivity: Sensitivity
     persistence: Literal["return_only"]
     log_policy: LogPolicy
+
+    @model_validator(mode="after")
+    def require_sensitive_redaction(self) -> "OutputDefinition":
+        if self.sensitivity != "public" and self.log_policy != "redact":
+            raise ValueError("sensitive outputs must use redacted logging")
+        if self.enum is not None and self.type != "string":
+            raise ValueError("only string outputs may declare an enum")
+        return self
 
 CheckPhase = Literal[
     "during_wait",
@@ -555,6 +593,15 @@ def condition_target_refs(
 
     return {target_ref}
 
+
+def nested_conditions(condition: Condition) -> list[Condition]:
+    conditions = [condition]
+    if isinstance(condition, AllCondition):
+        for child in condition.conditions:
+            conditions.extend(nested_conditions(child))
+    return conditions
+
+
 class CapabilityArtifact(StrictModel):
     schema_version: Literal["1.0.0"]
     capability: CapabilityMetadata
@@ -589,7 +636,63 @@ class CapabilityArtifact(StrictModel):
         target_ids = set(self.targets)
         context_ids = set(self.surface_contexts)
         route_ids = set(self.target.routes)
+        input_ids = set(self.inputs)
+        runtime_ids = set(self.target.runtime_bindings)
         output_ids = set(self.outputs)
+        value_ids = {
+            "inputs": input_ids,
+            "runtime": runtime_ids,
+            "outputs": output_ids,
+        }
+
+        def require_known_value_reference(
+            reference: str,
+            location: str,
+        ) -> None:
+            parts = reference.split(".")
+            if len(parts) != 2 or parts[0] not in value_ids:
+                raise ValueError(
+                    f"{location} contains invalid value reference "
+                    f"{reference!r}"
+                )
+            if parts[1] not in value_ids[parts[0]]:
+                raise ValueError(
+                    f"{location} references unknown value {reference!r}"
+                )
+
+        def validate_template(template: str, location: str) -> None:
+            for reference in _TEMPLATE_REFERENCE.findall(template):
+                require_known_value_reference(reference, location)
+
+        def validate_condition_values(
+            condition: Condition,
+            location: str,
+        ) -> None:
+            for nested in nested_conditions(condition):
+                if isinstance(nested, ElementValueEqualsCondition):
+                    require_known_value_reference(
+                        nested.value_from,
+                        location,
+                    )
+                elif isinstance(nested, OutputMatchesCondition):
+                    if nested.output not in output_ids:
+                        raise ValueError(
+                            f"{location} references unknown output "
+                            f"{nested.output!r}"
+                        )
+                    declared_type = self.outputs[nested.output].type
+                    if nested.type != declared_type:
+                        raise ValueError(
+                            f"{location} expects output {nested.output!r} "
+                            f"to be {nested.type!r}, but it is declared "
+                            f"as {declared_type!r}"
+                        )
+                elif isinstance(nested, RuntimeBindingPresentCondition):
+                    if nested.binding not in runtime_ids:
+                        raise ValueError(
+                            f"{location} references unknown runtime binding "
+                            f"{nested.binding!r}"
+                        )
 
         # Step IDs must be unique.
         step_ids = [step.id for step in self.steps]
@@ -629,6 +732,29 @@ class CapabilityArtifact(StrictModel):
                 f"{sorted(unknown_policy_routes)}"
             )
 
+        for route_id, route in self.target.routes.items():
+            validate_template(route.pattern, f"route {route_id!r}")
+
+        for allowed_origin in self.policy_requirements.allowed_origins:
+            validate_template(allowed_origin, "allowed origin")
+
+        for context_id, context in self.surface_contexts.items():
+            strategy_ids = [strategy.id for strategy in context.strategies]
+            if len(strategy_ids) != len(set(strategy_ids)):
+                raise ValueError(
+                    f"surface context {context_id!r} contains duplicate "
+                    "locator strategy IDs"
+                )
+            for strategy in context.strategies:
+                if (
+                    isinstance(strategy, AttributeStrategy)
+                    and strategy.value_template is not None
+                ):
+                    validate_template(
+                        strategy.value_template,
+                        f"surface context {context_id!r}",
+                    )
+
         # Validate target contexts and locator strategies.
         for target_id, target in self.targets.items():
             if target.context_ref not in context_ids:
@@ -657,6 +783,32 @@ class CapabilityArtifact(StrictModel):
                     f"target {target_id!r} references unknown "
                     f"primary strategy {primary!r}"
                 )
+
+            for strategy in target.strategies:
+                if isinstance(strategy, TextStrategy):
+                    if strategy.value_from is not None:
+                        require_known_value_reference(
+                            strategy.value_from,
+                            f"target {target_id!r}",
+                        )
+                elif isinstance(strategy, AttributeStrategy):
+                    if strategy.value_template is not None:
+                        validate_template(
+                            strategy.value_template,
+                            f"target {target_id!r}",
+                        )
+                elif isinstance(strategy, TableRelationStrategy):
+                    if (
+                        isinstance(
+                            strategy.row_match,
+                            ColumnValueRowMatch,
+                        )
+                        and strategy.row_match.equals_from is not None
+                    ):
+                        require_known_value_reference(
+                            strategy.row_match.equals_from,
+                            f"target {target_id!r}",
+                        )
 
         def require_known_targets(
             references: set[str],
@@ -693,6 +845,18 @@ class CapabilityArtifact(StrictModel):
                     f"step {step.id!r} action",
                 )
 
+                if self.targets[action_target].role_in_flow != "actionable":
+                    raise ValueError(
+                        f"step {step.id!r} acts on detection-only target "
+                        f"{action_target!r}"
+                    )
+
+            if isinstance(action, EnterTextAction):
+                require_known_value_reference(
+                    action.value_from,
+                    f"step {step.id!r} action",
+                )
+
             require_known_targets(
                 condition_target_refs(step.precondition),
                 f"step {step.id!r} precondition",
@@ -700,6 +864,14 @@ class CapabilityArtifact(StrictModel):
 
             require_known_targets(
                 condition_target_refs(step.postcondition),
+                f"step {step.id!r} postcondition",
+            )
+            validate_condition_values(
+                step.precondition,
+                f"step {step.id!r} precondition",
+            )
+            validate_condition_values(
+                step.postcondition,
                 f"step {step.id!r} postcondition",
             )
 
@@ -719,11 +891,27 @@ class CapabilityArtifact(StrictModel):
                         f"outputs: {sorted(undeclared_outputs)}"
                     )
 
+                amount_type = self.outputs[
+                    action.parser.amount_output
+                ].type
+                currency_type = self.outputs[
+                    action.parser.currency_output
+                ].type
+                if amount_type != "integer" or currency_type != "string":
+                    raise ValueError(
+                        f"step {step.id!r} money parser requires an "
+                        "integer amount output and string currency output"
+                    )
+
         # Validate the final checkpoint.
         require_known_targets(
             condition_target_refs(
                 self.success_checkpoint.condition
             ),
+            "success checkpoint",
+        )
+        validate_condition_values(
+            self.success_checkpoint.condition,
             "success checkpoint",
         )
 
@@ -735,6 +923,10 @@ class CapabilityArtifact(StrictModel):
                 ),
                 f"runtime condition "
                 f"{runtime_condition.code!r}",
+            )
+            validate_condition_values(
+                runtime_condition.detect,
+                f"runtime condition {runtime_condition.code!r}",
             )
 
             if isinstance(
@@ -749,6 +941,11 @@ class CapabilityArtifact(StrictModel):
                     ),
                     f"runtime condition "
                     f"{runtime_condition.code!r} "
+                    "resume condition",
+                )
+                validate_condition_values(
+                    runtime_condition.intervention.resume_condition,
+                    f"runtime condition {runtime_condition.code!r} "
                     "resume condition",
                 )
 
