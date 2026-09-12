@@ -8,3 +8,4 @@ __pycache__/
 .mypy_cache/
 build/
 dist/
+docs/INTERVIEW_NOTES.md

@@ -36,8 +36,6 @@ customer data, tokens, or PII into the sample application.
   `capabilities/`; the two files have different jobs and both are retained.
 
 See [REPORT.md](REPORT.md) for design decisions and trade-offs.
-For a class-by-class schema walkthrough and interview preparation, see
-[docs/INTERVIEW_NOTES.md](docs/INTERVIEW_NOTES.md).
 
 ## Setup
 
